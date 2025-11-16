@@ -1,0 +1,21 @@
+version: "3.8"
+
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - ADMIN_TOKEN=${ADMIN_TOKEN}
+    # Persist the application directory so the SQLite file survives container restarts
+    volumes:
+      - highscores_data:/app
+
+volumes:
+  highscores_data:
+    driver: local
+
+# Notes:
+# - This compose file keeps using SQLite (la misma implementación que hay en main.py).
+# - The SQLite file `highscores.db` se creará en /app dentro del contenedor y se persistirá
+#   gracias al volumen `highscores_data`.
