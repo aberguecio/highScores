@@ -19,5 +19,5 @@ services:
       - "traefik.http.services.highscores.loadbalancer.server.port=8000"
 
 networks:
-  traefik-public:
+  webapp:
     external: true
