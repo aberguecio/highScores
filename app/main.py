@@ -1,133 +1,71 @@
-# main.py
-import os
-import sqlite3
+"""Main FastAPI application"""
+
 import uuid
 from datetime import datetime
 from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException, Header, Query
-from pydantic import BaseModel, constr, conint
 
-DB_PATH = "./highscores.db"
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "change-me")  # cámbialo en el server
+from .models import (
+    GameCreate, GameOut, GameInfo,
+    HighscoreIn, HighscoreOut, HighscoreList
+)
+from .database import get_db, get_game_by_public_id
+from .auth import (
+    generate_api_key,
+    require_admin_token,
+    verify_game_ownership_or_admin
+)
 
-app = FastAPI(title="Highscores API")
-
-
-# ========== MODELOS Pydantic ==========
-
-class GameCreate(BaseModel):
-    name: constr(min_length=1, max_length=100)
-
-
-class GameOut(BaseModel):
-    public_id: str
-    name: str
-    created_at: str
-
-
-class HighscoreIn(BaseModel):
-    player_name: constr(min_length=1, max_length=32)
-    score: conint(ge=0, le=1_000_000_000)
-
-
-class HighscoreOut(BaseModel):
-    player_name: str
-    score: int
-    created_at: str
-
-
-class HighscoreList(BaseModel):
-    game_id: str
-    highscores: List[HighscoreOut]
-
-
-# ========== DB HELPERS ==========
-
-def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def init_db():
-    conn = get_db()
-    cur = conn.cursor()
-
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS games (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            public_id TEXT NOT NULL UNIQUE,
-            name TEXT NOT NULL,
-            created_at TEXT NOT NULL
-        )
-    """)
-
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS highscores (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            game_id INTEGER NOT NULL,
-            player_name TEXT NOT NULL,
-            score INTEGER NOT NULL,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY(game_id) REFERENCES games(id)
-        )
-    """)
-
-    conn.commit()
-    conn.close()
-
-
-init_db()
-
-
-def get_game_by_public_id(conn, public_id: str) -> Optional[sqlite3.Row]:
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM games WHERE public_id = ?", (public_id,))
-    return cur.fetchone()
-
-
-# ========== DEPENDENCIA PARA ADMIN ==========
-
-def require_admin_token(x_admin_token: str = Header(None, alias="X-Admin-Token")):
-    if x_admin_token != ADMIN_TOKEN:
-        raise HTTPException(status_code=401, detail="Invalid admin token")
+app = FastAPI(
+    title="Highscores API",
+    description="A lightweight REST API for managing game leaderboards",
+    version="2.0.0"
+)
 
 
 # ========== ENDPOINTS ==========
 
 @app.get("/")
 def healthcheck():
-    return {"status": "ok"}
+    """Health check endpoint"""
+    return {"status": "ok", "version": "2.0.0"}
 
 
-# ---------- PÚBLICO: crear juego ----------
+# ---------- PUBLIC: Create game ----------
 
 @app.post("/games", response_model=GameOut, status_code=201)
 def create_game(game: GameCreate):
     """
-    Público: cualquiera puede crear un juego nuevo.
-    Devuelve public_id, que es el que usarás en el frontend.
+    Public: Anyone can create a new game.
+    Returns public_id and api_key. Save the api_key - you'll need it to manage your game.
     """
     conn = get_db()
     cur = conn.cursor()
 
     public_id = "g_" + uuid.uuid4().hex[:16]
+    api_key = generate_api_key()
     now = datetime.utcnow().isoformat()
 
     try:
         cur.execute(
-            "INSERT INTO games (public_id, name, created_at) VALUES (?, ?, ?)",
-            (public_id, game.name.strip(), now)
+            "INSERT INTO games (public_id, name, email, api_key, created_at) VALUES (?, ?, ?, ?, ?)",
+            (public_id, game.name.strip(), game.email.lower(), api_key, now)
         )
         conn.commit()
     finally:
         conn.close()
 
-    return GameOut(public_id=public_id, name=game.name.strip(), created_at=now)
+    return GameOut(
+        public_id=public_id,
+        name=game.name.strip(),
+        email=game.email.lower(),
+        api_key=api_key,
+        created_at=now
+    )
 
 
-# ---------- PÚBLICO: enviar highscore ----------
+# ---------- PUBLIC: Submit highscore ----------
 
 @app.post(
     "/games/{public_id}/highscores",
@@ -136,7 +74,7 @@ def create_game(game: GameCreate):
 )
 def submit_highscore(public_id: str, hs: HighscoreIn):
     """
-    Público: lo usa el juego en JS para guardar un nuevo highscore.
+    Public: Submit a new highscore for a game.
     """
     conn = get_db()
     try:
@@ -164,7 +102,7 @@ def submit_highscore(public_id: str, hs: HighscoreIn):
     )
 
 
-# ---------- PÚBLICO: obtener ranking de un juego ----------
+# ---------- PUBLIC: Get highscores ----------
 
 @app.get(
     "/games/{public_id}/highscores",
@@ -175,7 +113,7 @@ def get_highscores(
     limit: int = Query(10, ge=1, le=50)
 ):
     """
-    Público: el juego consulta el top N scores.
+    Public: Get the top N highscores for a game.
     """
     conn = get_db()
     try:
@@ -210,12 +148,12 @@ def get_highscores(
     return HighscoreList(game_id=public_id, highscores=highscores)
 
 
-# ---------- ADMIN: listar juegos ----------
+# ---------- ADMIN: List games ----------
 
-@app.get("/games", response_model=List[GameOut])
+@app.get("/games", response_model=List[GameInfo])
 def list_games(x_admin_token: str = Header(None, alias="X-Admin-Token")):
     """
-    Privado: lista todos los juegos (requiere X-Admin-Token).
+    Admin only: List all games (requires X-Admin-Token).
     """
     require_admin_token(x_admin_token)
 
@@ -228,7 +166,7 @@ def list_games(x_admin_token: str = Header(None, alias="X-Admin-Token")):
         conn.close()
 
     return [
-        GameOut(
+        GameInfo(
             public_id=row["public_id"],
             name=row["name"],
             created_at=row["created_at"]
@@ -237,12 +175,12 @@ def list_games(x_admin_token: str = Header(None, alias="X-Admin-Token")):
     ]
 
 
-# ---------- ADMIN: detalles de un juego ----------
+# ---------- ADMIN: Get game details ----------
 
-@app.get("/games/{public_id}", response_model=GameOut)
+@app.get("/games/{public_id}", response_model=GameInfo)
 def get_game(public_id: str, x_admin_token: str = Header(None, alias="X-Admin-Token")):
     """
-    Privado: detalles de un juego por public_id.
+    Admin only: Get game details by public_id (requires X-Admin-Token).
     """
     require_admin_token(x_admin_token)
 
@@ -255,27 +193,28 @@ def get_game(public_id: str, x_admin_token: str = Header(None, alias="X-Admin-To
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
 
-    return GameOut(
+    return GameInfo(
         public_id=game["public_id"],
         name=game["name"],
         created_at=game["created_at"]
     )
 
 
-# ---------- ADMIN: resetear highscores de un juego ----------
+# ---------- OWNER OR ADMIN: Delete highscores ----------
 
 @app.delete("/games/{public_id}/highscores")
-def delete_highscores(public_id: str, x_admin_token: str = Header(None, alias="X-Admin-Token")):
+def delete_highscores(
+    public_id: str,
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    x_admin_token: Optional[str] = Header(None, alias="X-Admin-Token")
+):
     """
-    Privado: borra todos los highscores de un juego.
+    Delete all highscores for a game.
+    Requires either X-API-Key (game owner) or X-Admin-Token (admin).
     """
-    require_admin_token(x_admin_token)
-
     conn = get_db()
     try:
-        game = get_game_by_public_id(conn, public_id)
-        if not game:
-            raise HTTPException(status_code=404, detail="Game not found")
+        game = verify_game_ownership_or_admin(conn, public_id, x_api_key, x_admin_token)
 
         cur = conn.cursor()
         cur.execute("DELETE FROM highscores WHERE game_id = ?", (game["id"],))
@@ -287,20 +226,21 @@ def delete_highscores(public_id: str, x_admin_token: str = Header(None, alias="X
     return {"ok": True, "deleted": deleted}
 
 
-# ---------- ADMIN: borrar juego completo (opcional) ----------
+# ---------- OWNER OR ADMIN: Delete game ----------
 
 @app.delete("/games/{public_id}")
-def delete_game(public_id: str, x_admin_token: str = Header(None, alias="X-Admin-Token")):
+def delete_game(
+    public_id: str,
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    x_admin_token: Optional[str] = Header(None, alias="X-Admin-Token")
+):
     """
-    Privado: borra un juego y todos sus highscores.
+    Delete a game and all its highscores.
+    Requires either X-API-Key (game owner) or X-Admin-Token (admin).
     """
-    require_admin_token(x_admin_token)
-
     conn = get_db()
     try:
-        game = get_game_by_public_id(conn, public_id)
-        if not game:
-            raise HTTPException(status_code=404, detail="Game not found")
+        game = verify_game_ownership_or_admin(conn, public_id, x_api_key, x_admin_token)
 
         cur = conn.cursor()
         cur.execute("DELETE FROM highscores WHERE game_id = ?", (game["id"],))
