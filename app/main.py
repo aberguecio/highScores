@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException, Header, Query
+from fastapi.middleware.cors import CORSMiddleware
 
 from .models import (
     GameCreate, GameOut, GameInfo,
@@ -21,6 +22,15 @@ app = FastAPI(
     title="Highscores API",
     description="A lightweight REST API for managing game leaderboards",
     version="2.0.0"
+)
+
+# Configure CORS - Allow all origins for public API
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all methods (GET, POST, DELETE, etc.)
+    allow_headers=["*"],  # Allow all headers
 )
 
 

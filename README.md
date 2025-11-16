@@ -9,12 +9,14 @@ This API allows you to create games and track player highscores with a simple, s
 ## Features
 
 - **Public Endpoints**: Create games, submit scores, retrieve leaderboards
+- **CORS Enabled**: All origins allowed for easy integration from any domain
 - **Owner Authentication**: Each game creator gets a unique API key for managing their game
 - **Admin Endpoints**: Full administrative access with admin token
 - **SQLite Database**: Lightweight, file-based storage with automatic initialization
 - **Email Validation**: Valid email required for game creation
 - **Data Validation**: Score limits (0-1B), player name constraints (1-32 chars)
 - **Docker Support**: Easy deployment with Docker and Docker Compose
+- **Traefik Integration**: Automatic HTTPS with Let's Encrypt
 - **Persistent Storage**: Data survives container restarts via Docker volumes
 
 ## Project Structure
