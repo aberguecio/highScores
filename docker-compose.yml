@@ -10,13 +10,12 @@ services:
       # Mount data directory to persist database outside container
       - ./data:/data
     networks:
-      - traefik-public
+      - webapp
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.highscores.rule=Host(`highscores.berguecio.cl`)"
       - "traefik.http.routers.highscores.entrypoints=websecure"
       - "traefik.http.routers.highscores.tls=true"
-      - "traefik.http.routers.highscores.tls.certresolver=letsencrypt"
       - "traefik.http.services.highscores.loadbalancer.server.port=8000"
 
 networks:
