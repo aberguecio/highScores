@@ -3,6 +3,7 @@ version: "3.8"
 services:
   app:
     build: .
+    restart: unless-stopped
     environment:
       - ADMIN_TOKEN=${ADMIN_TOKEN:-change-me}
       - DB_PATH=/data/highscores.db
@@ -17,6 +18,7 @@ services:
       - "traefik.http.routers.highscores.entrypoints=websecure"
       - "traefik.http.routers.highscores.tls=true"
       - "traefik.http.services.highscores.loadbalancer.server.port=8000"
+      - "monitoring.url=https://highscores.berguecio.cl"
 
 networks:
   webapp:
